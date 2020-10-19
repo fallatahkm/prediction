@@ -1,0 +1,162 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Fallatah K. M."
+date: "10/14/2020"
+output:
+  html_document: default
+---
+
+```{r setup, include= FALSE }
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lattice)
+library(caret)
+library(car)
+library(scales)
+library(psych)
+library(ggplot2)
+library(glmnet)
+library(randomForest)
+library(ranger)
+library(tidyr)
+library(mlbench)
+library(C50) 
+```
+
+## Introduction
+first of all we download the data in the R program.we do some simple explanatory data analysis, we see the number of rows and column. then we identified na.strings ("NA", ".", "","#DIV/0!"), so become easy to detect the NA, then checked the data and remove all column have large number of NA, dots, empty data and #DIV/0!.
+a function has been made to locat the columns has NA with sapply function have been removed from the data set.  
+
+
+```{r , echo=FALSE}
+regtr <- read.csv("pml-training.csv", na.strings = c("NA", " ", ".","#DIV/0!"), header = T)
+tegtr <- read.csv("pml-testing.csv", na.strings = c("NA", "", ".", "#DIV/0!"),header = TRUE)
+
+d_an <- function(x){
+        s <- any(is.na(x))| any(x == "") | any(x == "#DIV/0!")
+}
+
+corre<- regtr[,!sapply(regtr, d_an)]
+corte <- tegtr[, !sapply(tegtr, d_an)]
+corre <- corre[, -c(1,2,5)] ; corte <- corte[, -c(1,2,5)]
+corre$classe <- factor(corre$classe, levels = c("A", "B", "C", "D", "E"))
+corre$new_window <- factor(corre$new_window, levels = c("no", "yes"))
+
+dmg <- dim(regtr)
+dmf <- dim(corre)
+```
+
+after cleaning the data its become `r dmf` row and column respectively, instead of `r dmg`.
+a percentage distribution have been measured for all classes, and they seem almost same and the plot of the result has been done.
+
+
+```{r}
+prop.table(table(corre$classe))
+barplot(table(corre$classe))
+```
+## Data spliting
+the training data has been divided into to part with training part contain about 75% and testing part contain 25% of the data. 
+
+```{r ,echo= FALSE}
+set.seed(123)
+inTrain = createDataPartition(corre$classe, p = .75, list= F)
+training = corre[inTrain, ]
+testing =  corre[-inTrain, ]
+
+table <- list(training_data = prop.table(table(training$classe)),
+testing_data = prop.table(table(testing$classe)))
+```
+data checked for NA, all training and testing show there is no NA for all 57 variables. training data and testing data
+
+### Training data
+```{r}
+training_na <- table(sapply(training, function(x){
+     all(is.na(x))}))
+training_na 
+```
+
+### Testing data
+```{r}
+testing_na <- table(sapply(testing, function(x){
+      all(is.na(x))}))
+testing_na
+```
+
+the percentage of classes checked in all data sets almost same. 
+### Training data 
+```{r}
+table[1]
+```
+### Testing data
+```{r}
+table[2]
+```
+### rpart method
+set a set.seed to ensure the result reproducible, use cross validation method for model training with 10 folds, see the result below with plotting.  
+
+```{r}
+set.seed(1813)
+mod_train_rp <- train(classe ~ . , method = "rpart", data = training, 
+                trControl = trainControl(method = "cv", number = 10,                                      verboseIter = F))
+pred_1_rp <- predict(mod_train_rp, testing)
+con_1 <- confusionMatrix(testing$classe, pred_1_rp)
+con_1$overall
+plot(mod_train_rp)
+```
+### LDA method
+set a set.seed to ensure the result reproducible, use cross validation method for model training with 10 folds, LDA did much better than rpart but still not so perfect. See the result below with plotting.
+```{r , error=FALSE}
+set.seed(1813)
+mod_train_lda <- train(classe ~ . , data = training, method = "lda",
+                 trControl = trainControl(method = "cv", number = 10, 
+                 verboseIter = F))
+pred_2_lda <- predict(mod_train_lda, testing)
+con_2 <- confusionMatrix(testing$classe, pred_2_lda)
+con_2$overall
+# no plotting because, there is no tuning parameter for this model
+```
+### gbm method
+set a set.seed to ensure the result reproducible, use repeated cross validation method for model training with 5 folds and repeated twice, gbm did much better than LDA but still not so perfect. See the result below, plotting can be displayed.
+```{r}
+set.seed(1813)
+mod_gbm <- trainControl(method = "repeatedcv", number = 5, repeats = 2)
+mod_train_gbm  <- train(classe ~ ., data = training, method = "gbm",
+                  trControl = mod_gbm, verbose = FALSE)
+pred_3_gbm <- predict(mod_train_gbm, newdata = testing)
+con_3 <- confusionMatrix(testing$classe, pred_3_gbm)
+con_3$overall
+plot(mod_train_gbm)
+```
+### random forst (rf) method
+set a set.seed to ensure the result reproducible, use repeated cross validation method for model training with 5 folds and repeated twice, rf did much better than gbm but still not so perfect. See the result below with plotting.
+
+```{r}
+set.seed(1813)
+ctrl_rf <- trainControl(method = "repeatedcv", number = 5, repeats = 2)
+mod_train_rf  <- train(classe ~ ., data = training, method = "rf",
+                 trControl = ctrl_rf, verbose = FALSE)
+pred_4_rf <- predict(mod_train_rf, newdata = testing)
+con_4 <- confusionMatrix(pred_4_rf, testing$classe)
+con_4$overall
+plot(mod_train_rf)
+```
+### ranger method
+set a set.seed to ensure the result reproducible, use repeated cross validation method for model training with 5 folds and repeated twice, ranger did almost simillar to random forst model. See the result below with plotting.
+```{r}
+set.seed(1813)
+ctrl_rn <- trainControl(method = "repeatedcv", number = 5, repeats = 2)
+mod_train_rn  <- train(classe ~ ., data = training, method = "ranger",
+                       trControl = ctrl_rn, verbose = FALSE)
+pred_5_rn <- predict(mod_train_rn, newdata = testing)
+con_5 <- confusionMatrix(pred_5_rn, testing$classe)
+con_5$overall
+plot(mod_train_rn)
+```
+we desided to apply the last to prediction models since they have same level of accuracy, and the both gave us same result exactly. 
+```{r}
+random_Forest_model <- predict(mod_train_rf, tegtr)
+random_Forest_model
+ranger_model <- predict(mod_train_rn, tegtr)
+ranger_model
+
+```
